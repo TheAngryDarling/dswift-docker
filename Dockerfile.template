@@ -1,0 +1,11 @@
+FROM swift:$SWIFT_TAG
+LABEL Description="Docker Container for Dynamic Swift programming language"
+
+# Tells the dswift-update script and subsequently the dswift source code NOT to include dswift specific parameters parsing
+ENV NO_DSWIFT_PARAMS true
+# Tells the dswift-update script and subsequently the dswift source code to look for user name and display name from env variables
+ENV ENABLE_ENV_USER_DETAILS true
+
+ADD https://raw.githubusercontent.com/TheAngryDarling/dswift/master/dswift-update /usr/bin/
+RUN chmod +x /usr/bin/dswift-update \
+    && bash /usr/bin/dswift-update
