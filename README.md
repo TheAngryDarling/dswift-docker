@@ -210,8 +210,9 @@ public struct Binary {
 ### dswift Config
 
 This is an optional file used to provide extra features within dswift
+If the dswift config does not already exists you can execute 'dswift --config' to generate the default configuration.  It will be located at at ~/.dswift.config
 
-```
+```JSON
 {
     // The default swift path to use unless specified in the command line
     "swiftPath": "/usr/bin/swift",
@@ -251,8 +252,8 @@ This is an optional file used to provide extra features within dswift
     // Regenerate Xcode Project (If already exists) when package is updated
     "regenerateXcodeProject": false,
 
-    // Your public repositor information.  This is used when auto-generating readme files
-    // "repository": "https://github.com/YOUR REPOSITORY" <-- Sets the Service URL and repository name
+    // Your public repository information.  This is used when auto-generating readme files
+    // "repository": "https://github.com/YOUR REPOSITORY" < - - Sets the Service URL and repository name
     // OR
     // Please note, serviceName and repositoryName are optional
     // "repository": {
