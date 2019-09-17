@@ -58,6 +58,11 @@ __dswift_docker_file_build() {
     for i in "${swiftVersions[@]}" ; do
         
         dockertag="$dockerUser/dswift:$i"
+        if [[ "$(docker images -q $dockertag 2> /dev/null)" != "" ]]; then
+            # do something
+            echo "Removing existing image for $dockertag"
+            docker images rm -f $dockertag
+        fi
         echo "Creating docker file for $dockertag" \
         && mkdir $i \
         && cp -n "$templateFile" "$i/$dockerFile" \
