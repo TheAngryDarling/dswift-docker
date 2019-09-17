@@ -212,7 +212,7 @@ public struct Binary {
 This is an optional file used to provide extra features within dswift
 If the dswift config does not already exists you can execute 'dswift --config' to generate the default configuration.  It will be located at at ~/.dswift.config
 
-```JSON
+```
 {
     // The default swift path to use unless specified in the command line
     "swiftPath": "/usr/bin/swift",
