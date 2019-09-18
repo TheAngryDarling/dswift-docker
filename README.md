@@ -260,7 +260,10 @@ If the dswift config does not already exists you can execute 'dswift --config' t
     //      "serviceName": "GitHub",
     //      "serviceURL": "https://github.com/YOUR REPOSITORY",
     //      "repositoryName": "YOUR REPOSITORY NAME",
-    // }
+    // },
+
+    /// (Optional, Default: true) Lock generated files from being modified manually
+    /// "lockGeneratedFiles": true,
 }
 ```
 
