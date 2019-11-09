@@ -214,8 +214,9 @@ If the dswift config does not already exists you can execute 'dswift --config' t
 
 ```
 {
-    // The default swift path to use unless specified in the command line
-    "swiftPath": "/usr/bin/swift",
+    // (Optional, If not set /usr/bin/swift is used) The default swift path to use unless specificed in the command line
+    // Note: Note supported in theangrydarling/dswift.  But you may link your physical copy of the config to the docker path to import all other settings
+    // "swiftPath": "/usr/bin/swift",
 
     // Sort files and folders within the project
     // "none":  No sorting
@@ -233,7 +234,7 @@ If the dswift config does not already exists you can execute 'dswift --config' t
     // "unlicense": The Unlicense
     // address to file (Local path address, or web address)
     "license": "none",
-
+    
     // The path the the specific read me files.  If set, and the file exists, it will be copied into the project replacing the standard one
     // Valid values are:
     //readme: "{path to read me file for all project types}" OR "generated"
@@ -245,15 +246,23 @@ If the dswift config does not already exists you can execute 'dswift --config' t
     //      "sysMod": "{path to read me file for all system-module projects}" OR "generated",
     // },
 
-    // Author Name.  Used when generated README.me as the author name
+    // Author Name.  Used when generated README.md as the author name
     // If author name is not set, the application wil try and use env variable REAL_DISPLAY_NAME if set otherwise use the current use display name from the system
     // "authorName": "YOUR NAME HERE",
+
+    // (Optional, Default: false) Generate Xcode Project on package creation if the flag is true
+    // "generateXcodeProjectOnInit": true,
+    // "generateXcodeProjectOnInit": {
+    //      "library": true,
+    //      "executable": true,
+    //      "sysMod": true,
+    // },
 
     // Regenerate Xcode Project (If already exists) when package is updated
     "regenerateXcodeProject": false,
 
-    // Your public repository information.  This is used when auto-generating readme files
-    // "repository": "https://github.com/YOUR REPOSITORY" < - - Sets the Service URL and repository name
+    // Your public repositor information.  This is used when auto-generating readme files
+    // "repository": "https://github.com/YOUR REPOSITORY", <-- Sets the Service URL and repository name
     // OR
     // Please note, serviceName and repositoryName are optional
     // "repository": {
@@ -263,7 +272,10 @@ If the dswift config does not already exists you can execute 'dswift --config' t
     // },
 
     /// (Optional, Default: true) Lock generated files from being modified manually
-    /// "lockGeneratedFiles": true,
+    /// "lockGenratedFiles": true,
+
+    /// (Optional, Default: false) Indicator if generated files should be kepted in Xcode Project when generating / updating project
+    /// "includeGeneratedFilesInXcodeProject": false
 }
 ```
 
