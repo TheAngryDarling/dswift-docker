@@ -2,7 +2,7 @@
 
 __dswift_docker_publish() {
     if [ "$1" == "1" ]; then 
-        echo "Publishing image $2"; 
+        printf "\033[2K\033[GPublishing image $2"; 
         docker push $2
     fi
 }
@@ -32,18 +32,7 @@ __dswift_docker_file_build() {
     local DSWIFT_BRANCH_LATEST="latest"
     local DSWIFT_REF_TAG="refs/tags/$DSWIFT_BRANCH_LATEST"
     local DSWIFT_SED_REF_TAG="$(echo $DSWIFT_REF_TAG | sed 's/\//\\\//g')"
-    local swiftTags=( $(curl -L -s 'https://registry.hub.docker.com/v2/repositories/library/swift/tags?page_size=1024' | grep -o -E '"name": "[A-Za-z0-9\.\-]+",' | sed 's/"name": "//g' | sed 's/",//g') )
-    local swiftVersions=( )
-    local tempArray=()
-    for i in "${swiftTags[@]}" ; do
-        # Only support version 4 and above that are not slim 
-        if [[ ( ! ( $i == 3* ) ) && ( ! ( $i == *"slim" ) ) ]] ; then 
-            tempArray+=($i)
-        fi
-    done
-
-    #sort and copy versions into global variable
-    read -d '' -r -a swiftVersions < <(printf '%s\n' "${tempArray[@]}" | sort)
+    local swiftVersions=( $(curl -L -s 'https://registry.hub.docker.com/v2/repositories/library/swift/tags?page_size=1024' | grep -o -E '"name": "[A-Za-z0-9\.\-]+",' | sed 's/"name": "//g' | sed 's/",//g' | grep -v 'slim' | grep -v 'sim' | grep -v -E '^3.*' | sort) )
 
     if [ $# -ge 1 ]; then
         local args=( "$@" )
@@ -59,12 +48,12 @@ __dswift_docker_file_build() {
         swiftVersions=( "${args[@]}" )
     fi
 
-    unset tempArray
-
     currentLocation=$(pwd)
     templateFilePath="$currentLocation/$templateFile"
     tmp_docker_root=$(mktemp -d -t dswift-)
     cd "$tmp_docker_root"
+    # Added directory for packages for support for local build
+    mkdir Packages
 
     echo "Downloading Latest Source Code"
     curl -L https://github.com/TheAngryDarling/dswift/archive/latest.tar.gz --output dswift.tar.gz 2>/dev/null
@@ -82,19 +71,21 @@ __dswift_docker_file_build() {
     for i in "${swiftVersions[@]}" ; do
         
         dockertag="$dockerUser/dswift:$i"
-        echo "Creating docker file for $dockertag" \
+        printf "Creating docker file for $dockertag" \
         && mkdir "$i" \
         && cp -n "$templateFilePath" "$i/$dockerFile" \
         && cp -r "dswift-latest" "$i/dswift-latest" \
+        && cp -r "Packages" "$i/Packages" \
         && cp "$shaFile" "$i/$shaFile" \
         && cp "dswift-update" "$i/dswift-update" \
         && cd "$i" \
         && sed -i.bak "s/\$SWIFT_TAG/$i/g" "$dockerFile" && rm "$dockerFile".bak \
-        && echo "Building image $dockertag" \
-        && docker build -t $dockertag . \
+        && printf "\033[2K\033[GBuilding image $dockertag" \
+        && docker build -q -t $dockertag . 1>/dev/null \
         && __dswift_docker_publish "$publishImage" "$dockertag" \
         && cd ".." \
-        && rm -r -f "$i" 
+        && rm -r -f "$i" \
+        && printf "\033[2K\033[GCreated $dockertag\n"
         
        
     done
