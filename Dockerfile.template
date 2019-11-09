@@ -15,17 +15,18 @@ RUN chmod +x /usr/bin/dswift-update
 COPY ./dswift.sha /usr/bin/
 
 #copy source code
-COPY ./dswift-latest /tmp/dswift
+COPY ./dswift-latest /tmp/source/Executables/dswift
+COPY ./Packages /tmp/source/Packages
 
-WORKDIR /tmp/dswift
+WORKDIR /tmp/source/Executables/dswift
 RUN echo "Compiling source code ..." \
     && swift build -c release  -Xswiftc -DNO_DSWIFT_PARAMS -Xswiftc -DENABLE_ENV_USER_DETAILS 1>/dev/null \
     && echo "Installing dswift ..." \
     && cp $(swift build  -c release  -Xswiftc -DNO_DSWIFT_PARAMS -Xswiftc -DENABLE_ENV_USER_DETAILS --show-bin-path)/dswift /usr/bin/dswift \
     && chmod -R o+r /usr/bin/dswift \
-    && cd .. \
+    && cd / \
     && echo "Removing source code ..." \
-    && rm -r -f /tmp/dswift \
+    && rm -r -f /tmp/source \
     && echo "Installing auto-complete scripts ..." \
     && dswift package install-completion-script bash > /dev/null \
     && dswift package install-completion-script zsh > /dev/null
