@@ -1,4 +1,4 @@
-#/usr/bash
+#!/bin/bash
 
 __dswift_docker_file_build() {
 
