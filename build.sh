@@ -1,4 +1,4 @@
-#/usr/bash
+#/bin/bash
 
 __dswift_docker_publish() {
     if [ "$1" == "1" ]; then 
@@ -32,7 +32,7 @@ __dswift_docker_file_build() {
     local DSWIFT_BRANCH_LATEST="latest"
     local DSWIFT_REF_TAG="refs/tags/$DSWIFT_BRANCH_LATEST"
     local DSWIFT_SED_REF_TAG="$(echo $DSWIFT_REF_TAG | sed 's/\//\\\//g')"
-    local swiftVersions=( $(curl -L -s 'https://registry.hub.docker.com/v2/repositories/library/swift/tags?page_size=1024' | grep -o -E '"name": "[A-Za-z0-9\.\-]+",' | sed 's/"name": "//g' | sed 's/",//g' | grep -v 'slim' | grep -v 'sim' | grep -v -E '^3.*' | sort) )
+    local swiftVersions=( $(curl -L -s 'https://registry.hub.docker.com/v2/repositories/library/swift/tags?page_size=1024' | grep -o -E '"name":\s?"[A-Za-z0-9\.\-]+",' | sed -E 's/"name":\s?"//g' | sed 's/",//g' | grep -v 'slim' | grep -v 'sim' | grep -v -E '^3.*' | sort) )
 
     if [ $# -ge 1 ]; then
         local args=( "$@" )
