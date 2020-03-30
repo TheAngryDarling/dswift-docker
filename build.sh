@@ -69,7 +69,11 @@ __dswift_docker_file_build() {
     
 
     for i in "${swiftVersions[@]}" ; do
-        
+        # Try and download/update swift image for given tag.  
+        # This is required because tags latest, xenial, and bionic get updated when 
+        # a new verson of swift becomes available
+        docker pull --quiet "swift:$i" 1>/dev/null
+
         dockertag="$dockerUser/dswift:$i"
         printf "Creating docker file for $dockertag" \
         && mkdir "$i" \
