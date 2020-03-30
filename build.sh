@@ -81,7 +81,7 @@ __dswift_docker_file_build() {
         && cd "$i" \
         && sed -i.bak "s/\$SWIFT_TAG/$i/g" "$dockerFile" && rm "$dockerFile".bak \
         && printf "\033[2K\033[GBuilding image $dockertag" \
-        && docker build -q -t $dockertag . 1>/dev/null \
+        && docker build -q --rm -t $dockertag . 1>/dev/null \
         && __dswift_docker_publish "$publishImage" "$dockertag" \
         && cd ".." \
         && rm -r -f "$i" \
