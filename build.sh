@@ -1,102 +1,396 @@
-#/bin/bash
 
-__dswift_docker_publish() {
-    if [ "$1" == "1" ]; then 
-        printf "\033[2K\033[GPublishing image $2"; 
-        docker push $2
-    fi
-}
-__dswift_docker_file_build() {
+if ! [ -x "$(command -v docker)" ]; then
+    echo "Error: DSwift Docker Build requires docker.  Please proceed to https://www.docker.com for installation instructions"
+    exit 1
+fi
+if ! [ -x "$(command -v docker-hub-list)" ]; then
+    echo "Error: DSwift Docker Build requires docker-hub-list.  Please proceed to https://github.com/TheAngryDarling/swift-docker for source"
+    exit 1
+fi
 
-    if [ "$1" == "--help" ]; then
-        echo "Usage:"
-        echo "'$0' - Build image for all swift tags"
-        echo "'$0 publish' - Build image for all swift tags and publish mages to docker hub"
-        echo "'$0 {swift tag}...' - Build images for specific swift versions"
-        echo "'$0 {swift tag}... publish' - Build images for specific swift versions and publish to docker hub"
-        return
-    fi
-
-    local dockerUser="theangrydarling"
-    local templateFile="Dockerfile.template"
-    local dockerFile="Dockerfile"
-    local shaFile="dswift.sha"
-    if [ ! -f $templateFile ]; then
-        echo "File $templateFile not found!"
-        return 1
-    fi
-
-    local publishImage=0
-
-    local DSWIFT_REPOSITORY="https://github.com/TheAngryDarling/dswift"
-    local DSWIFT_BRANCH_LATEST="latest"
-    local DSWIFT_REF_TAG="refs/tags/$DSWIFT_BRANCH_LATEST"
-    local DSWIFT_SED_REF_TAG="$(echo $DSWIFT_REF_TAG | sed 's/\//\\\//g')"
-    local swiftVersions=( $(curl -L -s 'https://registry.hub.docker.com/v2/repositories/library/swift/tags?page_size=1024' | grep -o -E '"name":\s?"[A-Za-z0-9\.\-]+",' | sed -E 's/"name":\s?"//g' | sed 's/",//g' | grep -v 'slim' | grep -v 'sim' | grep -v -E '^3.*' | sort) )
-
-    if [ $# -ge 1 ]; then
-        local args=( "$@" )
-        if [ "${@: -1}" == "publish" ]; then
-            publishImage=1
-           
-            if [ $# -eq 1 ]; then
-                args=( "${swiftVersions[@]}" )
-            else
-                 unset "args[${#args[@]}-1]"
-            fi
-        fi
-        swiftVersions=( "${args[@]}" )
-    fi
-
-    currentLocation=$(pwd)
-    templateFilePath="$currentLocation/$templateFile"
-    tmp_docker_root=$(mktemp -d -t dswift-)
-    cd "$tmp_docker_root"
-    # Added directory for packages for support for local build
-    mkdir Packages
-
-    echo "Downloading Latest Source Code"
-    curl -L https://github.com/TheAngryDarling/dswift/archive/latest.tar.gz --output dswift.tar.gz 2>/dev/null
-    tar xzf dswift.tar.gz
-    #cp -r ~/development/swift/Executables/dswift ./dswift-latest
-
-    echo "Downloading Latest Source Code SHA"
-    latestSHA=$(git ls-remote --refs $DSWIFT_REPOSITORY $DSWIFT_REF_TAG | sed -e "s/$DSWIFT_SED_REF_TAG//g" -e 's/[[:space:]]//g')
-    echo $latestSHA > $shaFile
-
-    echo "Downloading Updater Script"
-    curl https://raw.githubusercontent.com/TheAngryDarling/dswift/master/dswift-update --output dswift-update 2>/dev/null
+_dswift_docker_file_build_usage() {
     
+    echo "Usage:"
+    echo "$0 [OPTIONS] [primary|missing|swiftt tags...]" 
+    echo "$0 --help" 
+    echo "[OPTIONS]"
+    echo "-s, --source                  Location folder of source (Required)"
+    echo "-i, --imageName               Name of Docker Image (Required)"
+    echo "-li, --localImageName         The image name of the local copy to remove before building new image"
+    echo "-p, --publish                 Publish Images to Docker"
+    echo "-c, --clean                   Clean any images/tags that nore not connected to numeric only tags"
+    echo "-bp, --builderPrune           Prunes builder cache"
+    echo "-rft, --removeFailedTests     Remove images that fail test app"
+    echo "-h, --help                    Display Usage Screen"
+    
+}
 
-    for i in "${swiftVersions[@]}" ; do
+    
+scriptFolder="$(dirname $0)"
+pushd "$scriptFolder" >/dev/null
+scriptFolder="$(pwd -P)"
+popd >/dev/null
+
+
+dockerFilePath="$scriptFolder/Dockerfile"
+
+sourceLocation=""
+publish="false"
+clean="false"
+buildPrune="false"
+removeFailedTests="false"
+imageName=""
+localImageName=""
+swiftVersions=()
+manualSwiftVersions="true"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--h|-help|--help)
+            shift
+            
+            _dswift_docker_file_build_usage
+            return 0
+            ;;
+        -p|--p|-publish|--publish)
+            publish="true"
+            shift
+            ;;
+        -c|--c|-clean|--clean)
+            clean="true"
+            shift
+            ;;
+        -bp|--bp|-builderPrune|--builderPrune)
+            buildPrune="true"
+            shift
+            ;;
+        -rft|--rft|-removeFailedTests|--removeFailedTests)
+            removeFailedTests="true"
+            shift
+            ;;
+        -s|--s|-source|--source)
+            shift
+            if [[ $# -eq 0 ]]; then
+                echo "Missing 'source' path"
+                _dswift_docker_file_build_usage
+                return 1
+            fi
+            sourceLocation="$1"
+            shift
+            ;;
+        -i|--i|-imageName|--imageName)
+            shift
+            if [[ $# -eq 0 ]]; then
+                echo "Missing 'imaeName' value"
+                return 1
+            fi
+            imageName="$1"
+            shift
+            ;;
+        -li|--li|-localImageName|--localImageName)
+            shift
+            if [[ $# -eq 0 ]]; then
+                echo "Missing 'localImageName' value"
+                return 1
+            fi
+            localImageName="$1"
+            shift
+            ;;
+        *)
+            swiftVersions+=("$1")
+            shift
+            # copy rest of arguments here
+            while [[ $# -gt 0 ]]; do
+                swiftVersions+=("$1")
+                shift
+            done
+            ;;
+    esac
+done
+
+# ensure source is set
+if [ -z "$sourceLocation" ]; then
+    echo "Missing 'source'"
+    _dswift_docker_file_build_usage
+    return 1
+fi
+
+# ensure source location exists
+if [ ! -d "$sourceLocation" ]; then
+    echo "'source': '$sourceLocation' does not exist"
+    return 1
+fi
+
+# ensure image name is set
+if [ -z "$imageName" ]; then
+    echo "Missing 'imageName'"
+    _dswift_docker_file_build_usage
+    return 1
+fi
+
+# if publishing, ensure image name is a publishable name
+if [[ "$publish" == "true" ]] && [[ "$imageName" != *"/"* ]]; then
+    echo "Image Name '$imageName' is a local name only and can not be published"
+    return 1
+fi
+
+
+if [[ ${#swiftVersions[@]} -eq 0 ]]; then
+    # there were no specific tags so we'll get all usable tags
+     manualSwiftVersions="false"
+    swiftVersions=( $(docker-hub-list --tagExcludeX '^3' --tagExcludeX '\-slim$' --tagExcludeX '\-sim$' -tagExclude slim) )
+   
+elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing" ]]; then
+    # we must find missing tags
+     manualSwiftVersions="false"
+    # clear swiftVersions as it contains 'missing'
+    swiftVersions=()
+    # setup current tag array
+    currentTags=()
+    if [[ "$publish" == "true" ]]; then
+        # Get current list of tags from docker hub
+        curentTags=( $(docker-hub-list $imageName) )
+    else
+        # Get current list of tags from docker locally
+        curentTags=( $(docker images $imageName --format "{{.Tag}}" | sort) )
+    fi
+    allSwiftTags=( $(docker-hub-list --tagExcludeX '^3' --tagExcludeX '\-slim$' --tagExcludeX '\-sim$' -tagExclude slim) )
+    for i in "${allSwiftTags[@]}"; do 
+            if [[ ! " ${curentTags[@]} " =~ " $i " ]] ; then
+                swiftVersions+=( "$i" )
+            fi
+    done
+elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "primary" ]]; then
+    # we must find missing tags
+     manualSwiftVersions="false"
+     currentTags=( $(docker-hub-list --tagFilterX "^[4-9][(0-9)]*(\.[0-9]+){0,2}$") )
+     swiftVersions=()
+     for i in "${currentTags[@]}"; do 
+        if [[ "$i" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            swiftVersions+=( "$i" )
+        fi
+    done
+fi
+
+pushd "$sourceLocation" >/dev/null
+
+#echo "Swift Tags: ${swiftVersions[@]}"
+
+usedTags=()
+workingIndex=1
+totalTags=${#swiftVersions[@]}
+for i in "${swiftVersions[@]}" ; do
+    #echo "'$i'"
+    #continue
+    similarTags=()
+    if [[ ! " ${usedTags[*]} " =~ " ${i} " ]]; then
+        usedTags+=( "$i" )
         # Try and download/update swift image for given tag.  
         # This is required because tags latest, xenial, and bionic get updated when 
         # a new verson of swift becomes available
         docker pull --quiet "swift:$i" 1>/dev/null
-
-        dockertag="$dockerUser/dswift:$i"
-        printf "Creating docker file for $dockertag" \
-        && mkdir "$i" \
-        && cp -n "$templateFilePath" "$i/$dockerFile" \
-        && cp -r "dswift-latest" "$i/dswift-latest" \
-        && cp -r "Packages" "$i/Packages" \
-        && cp "$shaFile" "$i/$shaFile" \
-        && cp "dswift-update" "$i/dswift-update" \
-        && cd "$i" \
-        && sed -i.bak "s/\$SWIFT_TAG/$i/g" "$dockerFile" && rm "$dockerFile".bak \
-        && printf "\033[2K\033[GBuilding image $dockertag" \
-        && docker build -q --rm -t $dockertag . 1>/dev/null \
-        && __dswift_docker_publish "$publishImage" "$dockertag" \
-        && cd ".." \
-        && rm -r -f "$i" \
-        && printf "\033[2K\033[GCreated $dockertag\n"
         
-       
-    done
+        dockerTagParam="-t $imageName:$i"
+        dockertag="$imageName:$i"
+        similarTags=( $(docker-hub-list --similarTo $i) )
+        #echo "Similar Swift Tags to '$i': ${similarTags[@]}"
+        if [ $? -ne 0 ]; then
+            echo "Unable to get similar tags to '$i'" 1>&2
+            exit 1
+        fi
+        for tag in ${similarTags[@]}; do
+            dockertag+=" $imageName:$tag"
+            dockerTagParam+=" -t $imageName:$tag"
+            usedTags+=( "$tag" )
+        done
+        
+        #echo "Docker Tags: $dockertag"
+        printf "\033[2K\033[G[$workingIndex/$totalTags]: Building image for $dockertag"
+        #echo "docker build -q --rm $dockerTagParam --build-arg SWIFT_TAG=$i --file $dockerFilePath . 1>/dev/null"
+        startProcessTime=$SECONDS
+        docker build -q --rm $dockerTagParam --build-arg SWIFT_TAG=$i --file "$dockerFilePath" . 1>/dev/null 
+        buildExitCode=$?
+        endProcessTime=$SECONDS
+        elapsedProcessTime=$(( startProcessTime - endProcessTime ))
+        if [ $buildExitCode -ne 0 ]; then
+            printf "\033[2K\033[G[$workingIndex/$totalTags]: Failed to create $dockertag\n"
+        else
+            printf TZ=UTC0 "\033[2K\033[G[$workingIndex/$totalTags]: Built $dockertag in %(%H:%M:%S)T\n" $elapsedProcessTime
+            
+            # should do a build test here
+            
+            didTestBuild="false"
+            testBuildPassed="true"
+            testAppName="TestSwiftApp"
+            
+            testAppLoc="$sourceLocation/dswift-latest/Tests/dswiftlibTests/$testAppName"
+            if ! [ -d "$testAppLoc" ]; then
+                printf "\033[2K\033[G[$workingIndex/$totalTags]: Built image $dockertag"
+            else
+                testBuildRetry=0
+                didTestBuild="true"
+                testBuildPassed="false"
+                
+                #echo "testBuildPassed: $testBuildPassed"
+                #echo "testBuildRetry: $testBuildRetry"
+                while [[ "$testBuildPassed" == "false" ]] && [ "$testBuildRetry" -lt 2 ]; do
+                    testBuildRetry=$((testBuildRetry+1))
+                    printf "\033[2K\033[G     [$workingIndex/$totalTags]: Found Testing app for verification";
+                    tempTestLoc=$(mktemp -d)
+                    mkdir "$tempTestLoc/$testAppName" >/dev/null
+                    printf "\033[2K\033[G     [$workingIndex/$totalTags]: Creating test app";
+                    #echo "docker run --rm -v \"$tempTestLoc:/root\" -w \"/root/$testAppName\" \"$imageName:$i\" dswift package init --type executable"
+                    dockerResponse=$(docker run --rm -v "$tempTestLoc:/root" -w "/root/$testAppName" "$imageName:$i" dswift package init --type executable)
+                    if [ $? -ne 0 ]; then
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Failed to create test app on $dockertag";
+                        printf "\n"
+                        echo "$dockerResponse"
+                    else
+                        # remove old main
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
+                        rm "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                        # copy new main
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
+                        cp "$testAppLoc/testapp_main._swift" "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                        # copy core dswift file
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying dswift file";
+                        cp "$testAppLoc/testapp_dswift._dswift" "$tempTestLoc/$testAppName/Sources/$testAppName/testapp_dswift.dswift"
+                        # copy core dswift include file
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying include file";
+                        cp "$testAppLoc/included.file.dswiftInclude" "$tempTestLoc/$testAppName/Sources/$testAppName/included.file.dswiftInclude"
+                        # copy dswift include folder
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: copying include folder";
+                        cp -r "$testAppLoc/includeFolder" "$tempTestLoc/$testAppName/Sources/$testAppName/"
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: building test app";
+                        dockerResponse=$(docker run --rm -v "$tempTestLoc:/root" -w "/root/$testAppName" "$imageName:$i" dswift build 2>/dev/null)
+                        if [ $? -ne 0 ]; then
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Failed to build test app on $dockertag\n";
+                            printf "\n"
+                            echo "$dockerResponse"
+                        else
+                            appBuildPath=$(docker run --rm -v "$tempTestLoc:/root" -w "/root/$testAppName" "$imageName:$i" dswift build --show-bin-path)
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Executing testing app $appBuildPath/$testAppName";
+                            dockerResponse=$(docker run --rm -v "$tempTestLoc:/root" -w "/root/$testAppName" "$imageName:$i" "$appBuildPath/$testAppName")
+                            if [ $? -ne 0 ]; then
+                                printf "\033[2K\033[G     [$workingIndex/$totalTags]: Failed to run test app $testAppName in $appBuildPath on $dockertag\n";
+                                printf "\n"
+                                echo "$dockerResponse"
+                            else
+                                if [[ ${dockerResponse} != *"Hello World"* ]];then
+                                    printf "\033[2K\033[G     [$workingIndex/$totalTags]: Could not find 'Hello World' output on $dockertag";
+                                    printf "\n"
+                                    echo "$dockerResponse"
+                                else
+                                    if [[ ${dockerResponse} != *"Code Execution took"* ]];then
+                                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Could not find 'Code Execution took' output on $dockertag";
+                                        printf "\n"
+                                        echo "$dockerResponse"
+                                    else
+                                        if [[ ${dockerResponse} != *"This is content from the included file"* ]];then
+                                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Could not find 'This is content from the included file' output on $dockertag";
+                                            printf "\n"
+                                            echo "$dockerResponse"
+                                        else
+                                            if [[ ${dockerResponse} != *"This is content from the included folder file"* ]];then
+                                                printf "\033[2K\033[G     [$workingIndex/$totalTags]: Could not find 'This is content from the included folder file' output on $dockertag";
+                                                printf "\n"
+                                                secho "$dockerResponse"
+                                            else
+                                                printf "\033[2K\033[G[$workingIndex/$totalTags]: Built and Tested image $dockertag"
+                                                testBuildPassed="true"
+                                            fi
+                                        fi
+                                    fi
+                                fi
+                            fi
+                            
+                        fi
+                    fi
+                done
+            fi
+            
+            # Did try build test but it failed.  Lets remove the image?
+            if [[ "$removeFailedTests" == "true" && "$didTestBuild" == "true" && "$testBuildPassed" == "false" ]]; then
+                for img in "${similarTags[@]}" ; do
+                    # remove any similar tags
+                    docker rmi "$imageName:$img" > /dev/null 2>&1
+                done 
+                docker rmi -f "$imageName:$i" > /dev/null 2>&1
+            fi
+            # we make sure any test build passed before doing any publishing
+            if [[ "$testBuildPassed" == "true" ]]; then
+                
+                # if localImageName is set then we will remove and docker images with local name and same / similar tag to the working one
+                if [[ -z "$localImageName" ]]; then
+                    for img in "${similarTags[@]}" ; do
+                        # remove any similar tags
+                        docker rmi "$localImageName:$img" > /dev/null 2>&1
+                    done 
+                    docker rmi -f "$localImageName:$i" > /dev/null 2>&1
+                fi
+        
+                # check to see if we should publish
+                if [[ "$publish" == "true" ]]; then
+                    printf "\033[2K\033[G[$workingIndex/$totalTags]: Publishing image $dockertag";
+                    docker push "$imageName:$i" 1>/dev/null
+                    if [ $? -eq 0 ]; then
+                        for img in "${similarTags[@]}" ; do
+                            # remove any similar tags
+                            docker push "$imageName:$img" 1>/dev/null
+                            if [ $? -ne 0 ]; then
+                                break
+                            fi
+                        done 
+                    fi
+                    
+                    if [ $? -eq 0 ]; then
+                        if [[ "$didTestBuild" == "true" ]]; then
+                            printf "\033[2K\033[G[$workingIndex/$totalTags]: Built, Tested and Published image $dockertag";
+                        else
+                            printf "\033[2K\033[G[$workingIndex/$totalTags]: Built and Published image $dockertag";
+                        fi
+                    else
+                        printf "\033[2K\033[G[$workingIndex/$totalTags]: Faliled to publishing image $dockertag";
+                    fi
+                fi
+            fi
+            
+            printf "\n"
+            
+        fi
+        
+        if [[ "$clean" == "true" ]]; then
+            # if the tag is not 'latest' OR not swift version only, OR not similar to swift version only then we will remove the image
+            if ! ( [[ "$i" == "latest" ]] || [[ "$i" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || [[ "$similarTags" =~ \s[0-9]+(\.[0-9]+){0,2}\s ]] ) ; then
+                for img in "${similarTags[@]}" ; do
+                    # remove any similar tags
+                    docker rmi "$imageName:$img" > /dev/null 2>&1
+                    docker rmi "swift:$img" > /dev/null 2>&1
+                done 
+                # remove image with force
+                docker rmi -f "$imageName:$i" > /dev/null 2>&1
+                docker rmi -f "swift:$i" > /dev/null 2>&1
+                printf "\033[2K\033[G[$workingIndex/$totalTags]: Removing $dockertag per clean policy\n"
+            fi
+        fi
+        
+    fi
+    workingIndex=$((workingIndex+1))
+    if [[  manualSwiftVersions == "false" ]]; then
+        workingIndex=$((workingIndex+${#similarTags[@]}))
+    fi
+done
 
-    cd "$currentLocation"
-    echo "Cleaning up..."
-    rm -r -f "$tmp_docker_root"
-}
+if [[ "$buildPrune" == "true" ]]; then
+    docker builder prune --all --force > /dev/null 2>&1
+fi
 
-__dswift_docker_file_build $@
+# clean up any untagged dswift images
+docker rmi $(docker images --filter="dangling=true" --filter "LABEL=Description=Docker Container for Dynamic Swift programming language" -q) > /dev/null 2>&1
+
+popd >/dev/null
+    
+    
+
+    
+    
