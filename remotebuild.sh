@@ -1,7 +1,7 @@
 
 if [[ " $@ " == *"-h"* ]] || [[ " $@ " == *"-help"* ]]; then
     echo "Build public DSWIFT Docker Image(s):"
-    echo "$0 [OPTIONS] [primary|missing|swiftt tags...]"
+    echo "$0 [OPTIONS] [primary|primary-after-last|missing|missing-after-last|swiftt tags...]"
     echo "[OPTIONS]"
     echo "-h, --help                    Display Help"
     echo "-p, --publish                 Publish built tags to Docker"
