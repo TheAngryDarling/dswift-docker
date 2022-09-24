@@ -11,7 +11,7 @@ fi
 _dswift_docker_file_build_usage() {
     
     echo "Usage:"
-    echo "$0 [OPTIONS] [primary|missing|swiftt tags...]" 
+    echo "$0 [OPTIONS] [primary|primary-after-last|missing|missing-after-last|swiftt tags...]" 
     echo "$0 --help" 
     echo "[OPTIONS]"
     echo "-s, --source                  Location folder of source (Required)"
@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
         -i|--i|-imageName|--imageName)
             shift
             if [[ $# -eq 0 ]]; then
-                echo "Missing 'imaeName' value"
+                echo "Missing 'imageName' value"
                 return 1
             fi
             imageName="$1"
@@ -149,25 +149,79 @@ elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing" ]
     currentTags=()
     if [[ "$publish" == "true" ]]; then
         # Get current list of tags from docker hub
-        curentTags=( $(docker-hub-list $imageName) )
+        currentTags=( $(docker-hub-list $imageName) )
     else
         # Get current list of tags from docker locally
-        curentTags=( $(docker images $imageName --format "{{.Tag}}" | sort) )
+        currentTags=( $(docker images $imageName --format "{{.Tag}}" | sort) )
     fi
     allSwiftTags=( $(docker-hub-list --tagExcludeX '^3' --tagExcludeX '\-slim$' --tagExcludeX '\-sim$' -tagExclude slim) )
     for i in "${allSwiftTags[@]}"; do 
-            if [[ ! " ${curentTags[@]} " =~ " $i " ]] ; then
+            if [[ ! " ${currentTags[@]} " =~ " $i " ]] ; then
                 swiftVersions+=( "$i" )
             fi
+    done
+elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing-after-last" ]]; then
+    # we must find missing tags
+     manualSwiftVersions="false"
+    # clear swiftVersions as it contains 'missing-after-last'
+    swiftVersions=()
+    # setup current tag array
+    currentTags=()
+    if [[ "$publish" == "true" ]]; then
+        # Get current list of tags from docker hub
+        currentTags=( $(docker-hub-list $imageName) )
+    else
+        # Get current list of tags from docker locally
+        currentTags=( $(docker images $imageName --format "{{.Tag}}" | grep -v "-" | grep -E "[1-9][0-9]*(\.[0-9]+(\.[0-9]+)?)?" | sort) )
+    fi
+    allSwiftTags=( $(docker-hub-list --tagExcludeX '^3' --tagExcludeX '\-slim$' --tagExcludeX '\-sim$' -tagExclude slim) )
+    hasFoundLast="false"
+    
+    lastSwiftTag="${currentTags[${#currentTags[@]}-1]}"
+    #echo "Last Swift Version: $lastSwiftTag"
+    for i in "${allSwiftTags[@]}"; do 
+        #echo "Testing $i"
+        if [[ "$i" == "$lastSwiftTag" ]] || [[ "$i" == $lastSwiftTag* ]] ; then
+            allSwiftTags="true"
+        elif [[ "$allSwiftTags" == "true" ]] && [[ ! " ${currentTags[@]} " =~ " $i " ]] ; then
+           swiftVersions+=( "$i" )
+        fi
     done
 elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "primary" ]]; then
     # we must find missing tags
      manualSwiftVersions="false"
      currentTags=( $(docker-hub-list --tagFilterX "^[4-9][(0-9)]*(\.[0-9]+){0,2}$") )
+     # clear swiftVersions as it contains 'primary'
      swiftVersions=()
      for i in "${currentTags[@]}"; do 
         if [[ "$i" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
             swiftVersions+=( "$i" )
+        fi
+    done
+elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "primary-after-last" ]]; then
+    # we must find missing tags
+     manualSwiftVersions="false"
+    # clear swiftVersions as it contains 'primary-after-last'
+    swiftVersions=()
+    # setup current tag array
+    currentTags=()
+    if [[ "$publish" == "true" ]]; then
+        # Get current list of tags from docker hub
+        curentTags=( $(docker-hub-list $imageName | grep -v "-" | grep -E "[1-9][0-9]*(\.[0-9]+(\.[0-9]+)?)?" | sort) )
+    else
+        # Get current list of tags from docker locally
+        curentTags=( $(docker images $imageName --format "{{.Tag}}" | grep -v "-" | grep -E "[1-9][0-9]*(\.[0-9]+(\.[0-9]+)?)?" | sort) )
+    fi
+    allSwiftTags=( $(docker-hub-list --tagFilterX "^[4-9][(0-9)]*(\.[0-9]+){0,2}$") )
+    hasFoundLast="false"
+    lastSwiftTag="${currentTags[${#currentTags[@]}-1]}"
+    for i in "${allSwiftTags[@]}"; do 
+        if [[ "$i" == "$lastSwiftTag" ]] || [[ "$i" == $lastSwiftTag* ]] ; then
+            allSwiftTags="true"
+        elif [[ "$allSwiftTags" == "true" ]] && [[ ! " ${curentTags[@]} " =~ " $i " ]] ; then
+            if [[ "$i" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+                swiftVersions+=( "$i" )
+            fi
         fi
     done
 fi
@@ -179,7 +233,10 @@ pushd "$sourceLocation" >/dev/null
 usedTags=()
 workingIndex=1
 totalTags=${#swiftVersions[@]}
+countBeforePrune=0
+countToPrune=10
 for i in "${swiftVersions[@]}" ; do
+    countBeforePrune=$((countBeforePrune+1))
     #echo "'$i'"
     #continue
     similarTags=()
@@ -246,12 +303,24 @@ for i in "${swiftVersions[@]}" ; do
                         printf "\n"
                         echo "$dockerResponse"
                     else
-                        # remove old main
-                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
-                        rm "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
-                        # copy new main
-                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
-                        cp "$testAppLoc/testapp_main._swift" "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                        if [ -f "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift" ]; then
+                            # remove old main
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
+                            rm "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                             # copy new main
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
+                            cp "$testAppLoc/testapp_main._swift" "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                        elif  [ -f "$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift" ]; then
+                            # remove old main
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
+                            rm "$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift"
+                             # copy new main
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
+                            cp "$testAppLoc/testapp_main._swift" "$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift"
+                        else
+                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Failed to find main file for swift application";
+                            continue
+                        fi
                         # copy core dswift file
                         printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying dswift file";
                         cp "$testAppLoc/testapp_dswift._dswift" "$tempTestLoc/$testAppName/Sources/$testAppName/testapp_dswift.dswift"
@@ -378,6 +447,10 @@ for i in "${swiftVersions[@]}" ; do
     workingIndex=$((workingIndex+1))
     if [[  manualSwiftVersions == "false" ]]; then
         workingIndex=$((workingIndex+${#similarTags[@]}))
+    fi
+
+    if [[ "$buildPrune" == "true" ]] && [[ "$countBeforePrune" ==  "$countToPrune" ]]; then
+        docker builder prune --all --force > /dev/null 2>&1
     fi
 done
 
