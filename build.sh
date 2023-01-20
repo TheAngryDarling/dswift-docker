@@ -43,6 +43,7 @@ imageName=""
 localImageName=""
 swiftVersions=()
 manualSwiftVersions="true"
+primaryOnly="false"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -139,6 +140,9 @@ if [[ ${#swiftVersions[@]} -eq 0 ]]; then
     # there were no specific tags so we'll get all usable tags
      manualSwiftVersions="false"
     swiftVersions=( $(docker-hub-list --tagExcludeX '^3' --tagExcludeX '\-slim$' --tagExcludeX '\-sim$' -tagExclude slim) )
+
+    # clean builder cache since this is going to be a big process
+    docker builder prune --all --force > /dev/null 2>&1
    
 elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing" ]]; then
     # we must find missing tags
@@ -182,25 +186,31 @@ elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing-af
     for i in "${allSwiftTags[@]}"; do 
         #echo "Testing $i"
         if [[ "$i" == "$lastSwiftTag" ]] || [[ "$i" == $lastSwiftTag* ]] ; then
-            allSwiftTags="true"
-        elif [[ "$allSwiftTags" == "true" ]] && [[ ! " ${currentTags[@]} " =~ " $i " ]] ; then
+            hasFoundLast="true"
+        elif [[ "$hasFoundLast" == "true" ]] && [[ ! " ${currentTags[@]} " =~ " $i " ]] ; then
            swiftVersions+=( "$i" )
         fi
     done
 elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "primary" ]]; then
     # we must find missing tags
-     manualSwiftVersions="false"
-     currentTags=( $(docker-hub-list --tagFilterX "^[4-9][(0-9)]*(\.[0-9]+){0,2}$") )
-     # clear swiftVersions as it contains 'primary'
-     swiftVersions=()
-     for i in "${currentTags[@]}"; do 
+    manualSwiftVersions="false"
+    primaryOnly="true"
+    currentTags=( $(docker-hub-list --tagFilterX "^[4-9][(0-9)]*(\.[0-9]+){0,2}$") )
+    # clear swiftVersions as it contains 'primary'
+    swiftVersions=()
+    for i in "${currentTags[@]}"; do 
         if [[ "$i" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
             swiftVersions+=( "$i" )
         fi
     done
+
+    # clean builder cache since this is going to be a big process
+    docker builder prune --all --force > /dev/null 2>&1
+
 elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "primary-after-last" ]]; then
     # we must find missing tags
-     manualSwiftVersions="false"
+    manualSwiftVersions="false"
+    primaryOnly="true"
     # clear swiftVersions as it contains 'primary-after-last'
     swiftVersions=()
     # setup current tag array
@@ -217,8 +227,8 @@ elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "primary-af
     lastSwiftTag="${currentTags[${#currentTags[@]}-1]}"
     for i in "${allSwiftTags[@]}"; do 
         if [[ "$i" == "$lastSwiftTag" ]] || [[ "$i" == $lastSwiftTag* ]] ; then
-            allSwiftTags="true"
-        elif [[ "$allSwiftTags" == "true" ]] && [[ ! " ${curentTags[@]} " =~ " $i " ]] ; then
+            hasFoundLast="true"
+        elif [[ "$hasFoundLast" == "true" ]] && [[ ! " ${curentTags[@]} " =~ " $i " ]] ; then
             if [[ "$i" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
                 swiftVersions+=( "$i" )
             fi
@@ -256,8 +266,13 @@ for i in "${swiftVersions[@]}" ; do
             exit 1
         fi
         for tag in ${similarTags[@]}; do
-            dockertag+=" $imageName:$tag"
-            dockerTagParam+=" -t $imageName:$tag"
+            # if we are only doing primary, we will not
+            # tag with os specific tags that are the same
+            # as the primary
+            if [[ "$primaryOnly" != "true" ]] || ( [[ "$primaryOnly" == "true" ]] && [[ "$tag" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] ); then
+                dockertag+=" $imageName:$tag"
+                dockerTagParam+=" -t $imageName:$tag"
+            fi
             usedTags+=( "$tag" )
         done
         
@@ -445,7 +460,7 @@ for i in "${swiftVersions[@]}" ; do
         
     fi
     workingIndex=$((workingIndex+1))
-    if [[  manualSwiftVersions == "false" ]]; then
+    if [[ "$manualSwiftVersions" == "false" ]]; then
         workingIndex=$((workingIndex+${#similarTags[@]}))
     fi
 
