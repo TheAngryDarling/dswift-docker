@@ -40,7 +40,7 @@ echo "Grabbing Source Code"
 __syncFolder "$dswiftFolder/" ./dswift-latest
 
 if [[ $? -ne 0 ]]; then
-    ehco "Faild to copy source"
+    echo "Faild to copy source"
     exit 1
 fi
 
@@ -57,18 +57,24 @@ echo "LOCAL" > dswift.sha
 
 mkdir Packages
 
+# move into dswift project directory
+pushd "dswift-latest" >/dev/null
 # find any locally referenced packages
-localPackages=( $(swift package --package-path "$dswiftFolder" show-dependencies --format json | grep "url" | sed -e 's/ //g' -e 's/"url"://g' -e 's/",//g' -e 's/"//g' | grep -v http | grep -v dswift) )
+localPackages=( $(swift package show-dependencies --format json | grep "url" | sed -e 's/ //g' -e 's/"url"://g' -e 's/",//g' -e 's/"//g' | grep -v http | grep -v dswift) )
+# move out of project directory
+popd >/dev/null
+
 # copy locally referenced packages to our temp location
 for package in "${localPackages[@]}" ; do
         packageName="$(basename $package)"
         echo "Importing local package $packageName @ $package"
         __syncFolder "$package/" "./Packages/$packageName"
         if [[ $? -ne 0 ]]; then
-            ehco "Failed to copy package '$packageName'"
+            echo "Failed to copy package '$packageName'"
             exit 1
         fi
 done
+
 
 eval "$buildScriptPath --source $tmp_docker_root --imageName dswift -localImageName theangrydarling/dswift $@"
 let ret=$?
@@ -76,6 +82,7 @@ let ret=$?
 popd >/dev/null
 
 echo "Cleaning Up"
-rm -r "$tmp_docker_root"
+# added -f option to not prompt user to remove checked out items
+rm -f -r "$tmp_docker_root"
 
 exit $ret
