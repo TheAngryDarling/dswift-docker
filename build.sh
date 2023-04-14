@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
             shift
             
             _dswift_docker_file_build_usage
-            return 0
+            exit 0
             ;;
         -p|--p|-publish|--publish)
             publish="true"
@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
             if [[ $# -eq 0 ]]; then
                 echo "Missing 'source' path"
                 _dswift_docker_file_build_usage
-                return 1
+                exit 1
             fi
             sourceLocation="$1"
             shift
@@ -83,7 +83,7 @@ while [[ $# -gt 0 ]]; do
             shift
             if [[ $# -eq 0 ]]; then
                 echo "Missing 'imageName' value"
-                return 1
+                exit 1
             fi
             imageName="$1"
             shift
@@ -92,7 +92,7 @@ while [[ $# -gt 0 ]]; do
             shift
             if [[ $# -eq 0 ]]; then
                 echo "Missing 'localImageName' value"
-                return 1
+                exit 1
             fi
             localImageName="$1"
             shift
@@ -113,32 +113,32 @@ done
 if [ -z "$sourceLocation" ]; then
     echo "Missing 'source'"
     _dswift_docker_file_build_usage
-    return 1
+    exit 1
 fi
 
 # ensure source location exists
 if [ ! -d "$sourceLocation" ]; then
     echo "'source': '$sourceLocation' does not exist"
-    return 1
+    exit 1
 fi
 
 # ensure image name is set
 if [ -z "$imageName" ]; then
     echo "Missing 'imageName'"
     _dswift_docker_file_build_usage
-    return 1
+    exit 1
 fi
 
 # if publishing, ensure image name is a publishable name
 if [[ "$publish" == "true" ]] && [[ "$imageName" != *"/"* ]]; then
     echo "Image Name '$imageName' is a local name only and can not be published"
-    return 1
+    exit 1
 fi
 
 
 if [[ ${#swiftVersions[@]} -eq 0 ]]; then
     # there were no specific tags so we'll get all usable tags
-     manualSwiftVersions="false"
+    manualSwiftVersions="false"
     swiftVersions=( $(docker-hub-list --tagExcludeX '^3' --tagExcludeX '\-slim$' --tagExcludeX '\-sim$' -tagExclude slim) )
 
     # clean builder cache since this is going to be a big process
@@ -146,7 +146,7 @@ if [[ ${#swiftVersions[@]} -eq 0 ]]; then
    
 elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing" ]]; then
     # we must find missing tags
-     manualSwiftVersions="false"
+    manualSwiftVersions="false"
     # clear swiftVersions as it contains 'missing'
     swiftVersions=()
     # setup current tag array
@@ -166,7 +166,7 @@ elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing" ]
     done
 elif [[ ${#swiftVersions[@]} -eq 1 ]] && [[ "${swiftVersions[0]}" == "missing-after-last" ]]; then
     # we must find missing tags
-     manualSwiftVersions="false"
+    manualSwiftVersions="false"
     # clear swiftVersions as it contains 'missing-after-last'
     swiftVersions=()
     # setup current tag array
@@ -318,33 +318,45 @@ for i in "${swiftVersions[@]}" ; do
                         printf "\n"
                         echo "$dockerResponse"
                     else
-                        if [ -f "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift" ]; then
-                            # remove old main
-                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
-                            rm "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
-                             # copy new main
-                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
-                            cp "$testAppLoc/testapp_main._swift" "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                        sourceRoot="$tempTestLoc/$testAppName/Sources/$testAppName"
+                        oldMain=""
+                        mainName="$testAppName.swift"
+                        newMain="$testAppLoc/testapp_main._swift"
+
+                        if [ -f "$tempTestLoc/$testAppName/Sources/main.swift" ]; then
+                             # starting as of Swift 5.8
+                            oldMain="$tempTestLoc/$testAppName/Sources/main.swift"
+                            sourceRoot="$tempTestLoc/$testAppName/Sources"
+                            mainName="$testAppName.swift"
+                        elif [ -f "$tempTestLoc/$testAppName/Sources/$testAppName/main.swift" ]; then
+                            oldMain="$tempTestLoc/$testAppName/Sources/$testAppName/main.swift"
+                            sourceRoot="$tempTestLoc/$testAppName/Sources/$testAppName"
+                            mainName="$testAppName.swift"
                         elif  [ -f "$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift" ]; then
-                            # remove old main
-                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
-                            rm "$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift"
-                             # copy new main
-                            printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
-                            cp "$testAppLoc/testapp_main._swift" "$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift"
+                            oldMain="$tempTestLoc/$testAppName/Sources/$testAppName/$testAppName.swift"
+                            sourceRoot="$tempTestLoc/$testAppName/Sources/$testAppName"
+                            mainName="$testAppName.swift"
                         else
                             printf "\033[2K\033[G     [$workingIndex/$totalTags]: Failed to find main file for swift application";
                             continue
                         fi
+                        # remove old main
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Removing old main";
+                        rm "$oldMain"
+                        # copy new main
+                        printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying new main";
+                        cp "$newMain" "$sourceRoot/$mainName"
+
+
                         # copy core dswift file
                         printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying dswift file";
-                        cp "$testAppLoc/testapp_dswift._dswift" "$tempTestLoc/$testAppName/Sources/$testAppName/testapp_dswift.dswift"
+                        cp "$testAppLoc/testapp_dswift._dswift" "$sourceRoot/testapp_dswift.dswift"
                         # copy core dswift include file
                         printf "\033[2K\033[G     [$workingIndex/$totalTags]: Copying include file";
-                        cp "$testAppLoc/included.file.dswiftInclude" "$tempTestLoc/$testAppName/Sources/$testAppName/included.file.dswiftInclude"
+                        cp "$testAppLoc/included.file.dswiftInclude" "$sourceRoot/included.file.dswiftInclude"
                         # copy dswift include folder
                         printf "\033[2K\033[G     [$workingIndex/$totalTags]: copying include folder";
-                        cp -r "$testAppLoc/includeFolder" "$tempTestLoc/$testAppName/Sources/$testAppName/"
+                        cp -r "$testAppLoc/includeFolder" "$sourceRoot/"
                         printf "\033[2K\033[G     [$workingIndex/$totalTags]: building test app";
                         dockerResponse=$(docker run --rm -v "$tempTestLoc:/root" -w "/root/$testAppName" "$imageName:$i" dswift build 2>/dev/null)
                         if [ $? -ne 0 ]; then
